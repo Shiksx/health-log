@@ -195,6 +195,8 @@ body.locked main, body.locked dialog { visibility: hidden; }
       <button class="secondary" id="btnImport">Восстановить</button>
     </div>
     <input type="file" id="importFile" accept="application/json" class="hidden">
+    <h2>Мои триггеры</h2>
+    <div id="customTriggers"></div>
     <h2>Защита</h2>
     <p class="muted" id="pinState"></p>
     <div class="grid2" id="pinButtons"></div>
@@ -317,13 +319,14 @@ const OUTCOME = { "": "", yes: "помогло", partial: "частично", no
 // ---------- хранилище ----------
 // Ключ хранилища не меняется между версиями. Формат данных — поле version.
 const KEY = "cystitis-diary-v1";
-const DATA_VERSION = 3;
-const empty = () => ({ version: DATA_VERSION, episodes: [], events: [], days: {}, experiments: [], lastBackup: null });
+const DATA_VERSION = 4;
+const empty = () => ({ version: DATA_VERSION, episodes: [], events: [], days: {}, experiments: [], customTriggers: [], lastBackup: null });
 
 // Миграции: каждая переводит данные из версии N в N+1, ничего не удаляя.
 const MIGRATIONS = {
   1: d => ({ ...d, days: d.days || {}, lastBackup: d.lastBackup || null, version: 2 }),
   2: d => ({ ...d, experiments: d.experiments || [], version: 3 }),
+  3: d => ({ ...d, customTriggers: d.customTriggers || [], version: 4 }),
 };
 function migrate(d) {
   const from = d.version || 1;
@@ -376,6 +379,41 @@ function chips(container, list, selected, flagged) {
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// ---------- свои триггеры ----------
+// Удалённые свои триггеры остаются в списке (hidden), чтобы старые записи показывали название.
+const allTriggers = () => [...TRIGGERS, ...db.customTriggers.map(t => [t.key, t.name])];
+const visibleTriggers = () => [...TRIGGERS, ...db.customTriggers.filter(t => !t.hidden).map(t => [t.key, t.name])];
+function triggerChips(container, selected) {
+  chips(container, visibleTriggers(), selected);
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "chip";
+  add.style.borderStyle = "dashed";
+  add.textContent = "+ Свой";
+  add.onclick = () => {
+    const name = (prompt("Название триггера, напр. «Новое бельё»") || "").trim().slice(0, 40);
+    if (!name) return;
+    let t = db.customTriggers.find(x => x.name.toLowerCase() === name.toLowerCase());
+    if (t) t.hidden = false;
+    else { t = { key: "c_" + uid(), name }; db.customTriggers.push(t); }
+    selected.add(t.key);
+    save();
+    triggerChips(container, selected);
+  };
+  container.appendChild(add);
+}
+function renderCustomTriggers() {
+  const list = db.customTriggers.filter(t => !t.hidden);
+  $("#customTriggers").innerHTML = list.length
+    ? `<div class="card">${list.map(t => `<div class="item" style="padding:4px 0"><span>📌 ${esc(t.name)}</span><button class="ghost" data-deltrig="${t.key}">✕</button></div>`).join("")}</div>`
+    : `<p class="muted">Своих триггеров пока нет. Добавить можно кнопкой «+ Свой» в эпизоде или в «Событие / триггер».</p>`;
+  document.querySelectorAll("[data-deltrig]").forEach(b => b.onclick = () => {
+    const t = db.customTriggers.find(x => x.key === b.dataset.deltrig);
+    if (!confirm(`Убрать «${t.name}» из списка? Старые записи с ним сохранятся.`)) return;
+    t.hidden = true; save();
+  });
+}
+
 // ---------- эпизод ----------
 let epSym, epTrig, editingId = null;
 function redFlagCheck() {
@@ -404,7 +442,7 @@ function openEpisode(ep, startDate, presetSymptoms) {
   epSym = new Set(ep?.symptoms || presetSymptoms || []);
   epTrig = new Set(ep?.triggers || []);
   chips($("#epSymptoms"), SYMPTOMS, epSym, redFlagCheck);
-  chips($("#epTriggers"), TRIGGERS, epTrig);
+  triggerChips($("#epTriggers"), epTrig);
   redFlagCheck();
   $("#epDelete").classList.toggle("hidden", !ep);
   $("#dlgEpisode").showModal();
@@ -653,7 +691,7 @@ function openEvent(kind) {
   $("#waterVal").textContent = f.water.value;
   $("#evTitle").textContent = { trigger: "Событие / триггер", proph: "Профилактика", water: "Вода за день" }[kind];
   $("#evChoiceLabel").textContent = kind === "proph" ? "Что приняли" : "Что было";
-  if (!water) chips($("#evChoices"), kind === "proph" ? PROPHYLAXIS : TRIGGERS, evSel);
+  if (!water) kind === "proph" ? chips($("#evChoices"), PROPHYLAXIS, evSel) : triggerChips($("#evChoices"), evSel);
   $("#dlgEvent").showModal();
 }
 $("#formEvent").water.oninput = e => $("#waterVal").textContent = e.target.value;
@@ -675,7 +713,7 @@ function deleteEvent(id) {
 function evText(e) {
   if (e.kind === "water") return "💧 Вода: " + e.value + " л";
   if (e.kind === "proph") return "💊 " + label(PROPHYLAXIS, e.key);
-  return "📌 " + label(TRIGGERS, e.key);
+  return "📌 " + label(allTriggers(), e.key);
 }
 function episodeCard(ep, clickable = true) {
   const dur = ep.end ? daysBetween(ep.start, ep.end) + 1 + " дн." : "идёт";
@@ -683,7 +721,7 @@ function episodeCard(ep, clickable = true) {
   const meta = [ep.treatment, TEST[ep.test], OUTCOME[ep.outcome]].filter(Boolean).map(esc).join(" · ");
   return `<div class="card" ${clickable ? `data-ep="${ep.id}"` : ""}>
     <div class="item"><div><b>${fmt(ep.start)}</b> ${flags ? "⚠" : ""}<br>
-    <small>${dur} · тяжесть ${ep.severity}/10${ep.triggers.length ? " · " + esc(ep.triggers.map(t => label(TRIGGERS, t)).join(", ")) : ""}</small>
+    <small>${dur} · тяжесть ${ep.severity}/10${ep.triggers.length ? " · " + esc(ep.triggers.map(t => label(allTriggers(), t)).join(", ")) : ""}</small>
     ${meta ? `<br><small>${meta}</small>` : ""}</div></div></div>`;
 }
 function dayLine(date, d) {
@@ -734,6 +772,7 @@ function render() {
   renderDaily();
   renderBackupBanner();
   renderExp();
+  renderCustomTriggers();
   const dayKeys = Object.keys(db.days).sort().reverse();
   $("#days").innerHTML = dayKeys.length
     ? `<div class="card">${dayKeys.slice(0, 60).map(k => dayLine(k, db.days[k])).join("")}</div>`
@@ -793,7 +832,7 @@ function report() {
   for (const e of eps) {
     lines.push(`• ${fmt(e.start)}${e.end ? " – " + fmt(e.end) : " (идёт)"}, тяжесть ${e.severity}/10`);
     if (e.symptoms.length) lines.push("  Симптомы: " + e.symptoms.map(s => label(SYMPTOMS, s)).join(", "));
-    if (e.triggers.length) lines.push("  Возможная причина: " + e.triggers.map(s => label(TRIGGERS, s)).join(", "));
+    if (e.triggers.length) lines.push("  Возможная причина: " + e.triggers.map(s => label(allTriggers(), s)).join(", "));
     if (e.treatment) lines.push("  Лечение: " + e.treatment + (e.outcome ? ` (${OUTCOME[e.outcome]})` : ""));
     if (e.test) lines.push("  Анализ: " + TEST[e.test]);
     if (e.note) lines.push("  " + e.note);
@@ -822,7 +861,7 @@ function report() {
   for (const e of eps) for (const t of e.triggers) trig[t] = (trig[t] || 0) + 1;
   if (Object.keys(trig).length) {
     lines.push("", "Чаще всего перед эпизодом:");
-    Object.entries(trig).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => lines.push(`  ${label(TRIGGERS, k)}: ${n} из ${eps.length}`));
+    Object.entries(trig).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => lines.push(`  ${label(allTriggers(), k)}: ${n} из ${eps.length}`));
   }
   return lines.join("\n");
 }
