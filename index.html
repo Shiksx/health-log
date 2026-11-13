@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Дневник цистита</title>
+<meta name="theme-color" content="#7c4dff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Цистит">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root {
+  --bg: #f6f5fa; --card: #fff; --text: #1d1b22; --muted: #6b6775;
+  --accent: #7c4dff; --accent-soft: #ece6ff; --danger: #c62828; --danger-soft: #fdecea;
+  --ok: #2e7d32; --ok-soft: #e8f5e9; --line: #e4e1ea;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131217; --card: #1e1c24; --text: #ece9f2; --muted: #a29eab;
+    --accent: #b39dff; --accent-soft: #2c2640; --danger: #ff8a80; --danger-soft: #3a1f1f;
+    --ok: #81c784; --ok-soft: #1f2e21; --line: #2f2c36;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 24px);
+}
+main { max-width: 560px; margin: 0 auto; }
+h1 { font-size: 28px; margin: 16px 0 2px; }
+h2 { font-size: 18px; margin: 24px 0 8px; }
+.muted { color: var(--muted); font-size: 14px; }
+.card { background: var(--card); border-radius: 16px; padding: 14px 16px; margin: 10px 0; border: 1px solid var(--line); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px; text-align: center; }
+.stat b { display: block; font-size: 24px; }
+.stat span { font-size: 12px; color: var(--muted); }
+.badge { display: inline-block; padding: 4px 10px; border-radius: 99px; font-size: 13px; font-weight: 600; }
+.badge.warn { background: var(--danger-soft); color: var(--danger); }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.active { border: 2px solid var(--accent); background: var(--accent-soft); }
+button {
+  font: inherit; border: 0; border-radius: 14px; padding: 12px 16px; cursor: pointer;
+  background: var(--accent); color: #fff; font-weight: 600;
+}
+button.secondary { background: var(--accent-soft); color: var(--accent); }
+button.ghost { background: transparent; color: var(--muted); padding: 6px 8px; font-weight: 400; }
+button.danger { background: var(--danger-soft); color: var(--danger); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.big { padding: 18px 12px; font-size: 16px; }
+.big .ic { display: block; font-size: 26px; margin-bottom: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 8px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--text); font-weight: 400; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip.flag.on { background: var(--danger); border-color: var(--danger); }
+label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 4px; }
+input, select, textarea {
+  font: inherit; width: 100%; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+}
+input[type=range] { padding: 0; accent-color: var(--accent); }
+textarea { min-height: 60px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { flex: 1; }
+.alert { background: var(--danger-soft); color: var(--danger); border-radius: 12px; padding: 10px 12px; margin-top: 10px; font-size: 14px; }
+.item { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+.item small { color: var(--muted); }
+dialog {
+  border: 0; border-radius: 20px 20px 0 0; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px);
+  width: 100%; max-width: 560px; margin: auto auto 0; max-height: 92vh;
+  background: var(--bg); color: var(--text);
+}
+dialog::backdrop { background: rgba(0,0,0,.4); }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; }
+.dlg-head h2 { margin: 0; }
+.actions { display: flex; gap: 8px; margin-top: 16px; }
+.actions button { flex: 1; }
+.tabs { display: flex; gap: 6px; margin-top: 12px; }
+.tabs button { flex: 1; padding: 10px; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Цистит</h1>
+  <div class="muted" id="today"></div>
+
+  <div class="tabs">
+    <button data-tab="home">Главная</button>
+    <button data-tab="history" class="secondary">История</button>
+    <button data-tab="settings" class="secondary">Данные</button>
+  </div>
+
+  <!-- ГЛАВНАЯ -->
+  <section id="tab-home">
+    <div id="activeBox"></div>
+
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><b id="sDays">—</b><span>дней без эпизода</span></div>
+      <div class="stat"><b id="s6">0</b><span>за 6 мес</span></div>
+      <div class="stat"><b id="s12">0</b><span>за 12 мес</span></div>
+    </div>
+    <div style="margin-top:8px" id="recurrence"></div>
+
+    <h2>Быстрая запись</h2>
+    <div class="grid2">
+      <button class="big" id="btnEpisode"><span class="ic">🩺</span>Начался эпизод</button>
+      <button class="big secondary" id="btnEvent"><span class="ic">📌</span>Событие / триггер</button>
+      <button class="big secondary" id="btnProph"><span class="ic">💊</span>Профилактика</button>
+      <button class="big secondary" id="btnWater"><span class="ic">💧</span>Вода за день</button>
+    </div>
+
+    <h2>Последние записи</h2>
+    <div id="recent"></div>
+  </section>
+
+  <!-- ИСТОРИЯ -->
+  <section id="tab-history" class="hidden">
+    <h2>Эпизоды</h2>
+    <div id="episodes"></div>
+    <h2>События и профилактика</h2>
+    <div id="events"></div>
+  </section>
+
+  <!-- ДАННЫЕ -->
+  <section id="tab-settings" class="hidden">
+    <h2>Резервная копия</h2>
+    <p class="muted">Данные хранятся только на этом телефоне. Время от времени сохраняйте копию в «Файлы».</p>
+    <div class="grid2">
+      <button id="btnExport">Сохранить копию</button>
+      <button class="secondary" id="btnImport">Восстановить</button>
+    </div>
+    <input type="file" id="importFile" accept="application/json" class="hidden">
+    <h2>Для врача</h2>
+    <button class="secondary" id="btnReport" style="width:100%">Сводка за 12 месяцев (текст)</button>
+    <textarea id="reportOut" class="hidden" style="min-height:240px;margin-top:8px" readonly></textarea>
+    <p class="muted" style="margin-top:24px">Это личный дневник, а не медицинский инструмент. Решения о лечении — с врачом.</p>
+  </section>
+</main>
+
+<!-- ДИАЛОГ: ЭПИЗОД -->
+<dialog id="dlgEpisode">
+  <form method="dialog" id="formEpisode">
+    <div class="dlg-head"><h2 id="epTitle">Эпизод</h2><button class="ghost" value="cancel">✕</button></div>
+    <div class="row">
+      <div><label>Начало</label><input type="date" name="start" required></div>
+      <div><label>Окончание</label><input type="date" name="end"></div>
+    </div>
+    <label>Симптомы</label>
+    <div class="chips" id="epSymptoms"></div>
+    <label>Тяжесть: <b id="sevVal">5</b>/10</label>
+    <input type="range" name="severity" min="1" max="10" value="5">
+    <div id="epAlert" class="alert hidden"></div>
+    <label>Возможная причина</label>
+    <div class="chips" id="epTriggers"></div>
+    <label>Лечение (препарат, доза, дней)</label>
+    <input name="treatment" placeholder="напр. Фосфомицин 3 г, однократно">
+    <div class="row">
+      <div><label>Анализ мочи / посев</label>
+        <select name="test">
+          <option value="">не делали</option>
+          <option value="pending">ждём результат</option>
+          <option value="positive">бактерии найдены</option>
+          <option value="negative">чисто</option>
+        </select></div>
+      <div><label>Помогло?</label>
+        <select name="outcome">
+          <option value="">ещё неизвестно</option>
+          <option value="yes">да</option>
+          <option value="partial">частично</option>
+          <option value="no">нет</option>
+        </select></div>
+    </div>
+    <label>Детали анализа / заметка</label>
+    <textarea name="note" placeholder="напр. E. coli 10^5, чувствительна к ..."></textarea>
+    <div class="actions">
+      <button type="button" class="danger hidden" id="epDelete">Удалить</button>
+      <button value="save">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ДИАЛОГ: СОБЫТИЕ / ПРОФИЛАКТИКА / ВОДА -->
+<dialog id="dlgEvent">
+  <form method="dialog" id="formEvent">
+    <div class="dlg-head"><h2 id="evTitle">Событие</h2><button class="ghost" value="cancel">✕</button></div>
+    <label>Дата</label>
+    <input type="date" name="date" required>
+    <div id="evChoiceWrap">
+      <label id="evChoiceLabel">Что было</label>
+      <div class="chips" id="evChoices"></div>
+    </div>
+    <div id="evWaterWrap" class="hidden">
+      <label>Сколько выпито: <b id="waterVal">1.5</b> л</label>
+      <input type="range" name="water" min="0" max="4" step="0.25" value="1.5">
+    </div>
+    <label>Заметка</label>
+    <input name="note">
+    <div class="actions"><button value="save">Сохранить</button></div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+// ---------- справочники ----------
+const SYMPTOMS = [
+  ["burning", "Рези/жжение"], ["frequency", "Частые позывы"], ["urgency", "Срочные позывы"],
+  ["pain_low", "Боль внизу живота"], ["incomplete", "Неполное опорожнение"], ["cloudy", "Мутная моча"],
+  ["blood", "Кровь в моче", true], ["fever", "Температура ≥ 38", true],
+  ["back_pain", "Боль в пояснице/боку", true], ["chills", "Озноб", true],
+];
+const TRIGGERS = [
+  ["sex", "Половой акт"], ["cold", "Переохлаждение"], ["low_water", "Мало воды"],
+  ["period", "Менструация"], ["holding", "Долго терпела"], ["stress", "Стресс"],
+  ["antibiotics", "Недавно антибиотики"], ["bath", "Ванна/бассейн"], ["new_product", "Новое средство гигиены"],
+  ["ibs", "Обострение СРК"],
+];
+const PROPHYLAXIS = [
+  ["dmannose", "D-манноза"], ["cranberry", "Клюква"], ["post_sex", "Профилактика после секса"],
+  ["low_dose_ab", "Антибиотик (профилакт.)"], ["uro_vaxom", "Уро-Ваксом"], ["probiotic", "Пробиотик"],
+  ["estrogen", "Местные эстрогены"], ["other", "Другое"],
+];
+const label = (list, key) => (list.find(x => x[0] === key) || [key, key])[1];
+const TEST = { "": "", pending: "ждём анализ", positive: "бактерии найдены", negative: "анализ чистый" };
+const OUTCOME = { "": "", yes: "помогло", partial: "частично", no: "не помогло" };
+
+// ---------- хранилище ----------
+const KEY = "cystitis-diary-v1";
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || { episodes: [], events: [] }; }
+  catch { return { episodes: [], events: [] }; }
+}
+let db = load();
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(db)); }
+  catch (e) { alert("Не удалось сохранить: " + e.message); }
+  render();
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+// ---------- даты ----------
+const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const parse = s => new Date(s + "T00:00:00");
+const daysBetween = (a, b) => Math.round((parse(b) - parse(a)) / 86400000);
+const fmt = s => parse(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
+const monthsAgo = n => { const d = new Date(); d.setMonth(d.getMonth() - n); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+
+// ---------- UI helpers ----------
+const $ = s => document.querySelector(s);
+function chips(container, list, selected, flagged) {
+  container.innerHTML = "";
+  for (const [key, text, flag] of list) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (flag ? " flag" : "") + (selected.has(key) ? " on" : "");
+    b.textContent = text;
+    b.onclick = () => {
+      selected.has(key) ? selected.delete(key) : selected.add(key);
+      b.classList.toggle("on");
+      flagged && flagged();
+    };
+    container.appendChild(b);
+  }
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- эпизод ----------
+let epSym, epTrig, editingId = null;
+function redFlagCheck() {
+  const flags = SYMPTOMS.filter(s => s[2] && epSym.has(s[0])).map(s => s[1].toLowerCase());
+  const box = $("#epAlert");
+  if (!flags.length) { box.classList.add("hidden"); return; }
+  const kidney = epSym.has("fever") || epSym.has("back_pain") || epSym.has("chills");
+  box.innerHTML = kidney
+    ? "⚠ " + esc(flags.join(", ")) + " — возможна инфекция почек. Обратитесь к врачу сегодня, не ждите."
+    : "⚠ Кровь в моче — стоит показаться врачу и сдать анализ.";
+  box.classList.remove("hidden");
+}
+function openEpisode(ep) {
+  const f = $("#formEpisode");
+  f.reset();
+  editingId = ep ? ep.id : null;
+  $("#epTitle").textContent = ep ? "Эпизод" : "Новый эпизод";
+  f.start.value = ep ? ep.start : todayISO();
+  f.end.value = ep?.end || "";
+  f.severity.value = ep?.severity || 5;
+  $("#sevVal").textContent = f.severity.value;
+  f.treatment.value = ep?.treatment || "";
+  f.test.value = ep?.test || "";
+  f.outcome.value = ep?.outcome || "";
+  f.note.value = ep?.note || "";
+  epSym = new Set(ep?.symptoms || []);
+  epTrig = new Set(ep?.triggers || []);
+  chips($("#epSymptoms"), SYMPTOMS, epSym, redFlagCheck);
+  chips($("#epTriggers"), TRIGGERS, epTrig);
+  redFlagCheck();
+  $("#epDelete").classList.toggle("hidden", !ep);
+  $("#dlgEpisode").showModal();
+}
+$("#formEpisode").severity.oninput = e => $("#sevVal").textContent = e.target.value;
+$("#formEpisode").addEventListener("submit", ev => {
+  if (ev.submitter?.value !== "save") return;
+  const f = $("#formEpisode");
+  const rec = {
+    id: editingId || uid(), start: f.start.value, end: f.end.value || null,
+    symptoms: [...epSym], triggers: [...epTrig], severity: +f.severity.value,
+    treatment: f.treatment.value.trim(), test: f.test.value, outcome: f.outcome.value, note: f.note.value.trim(),
+  };
+  if (rec.end && rec.end < rec.start) rec.end = rec.start;
+  const i = db.episodes.findIndex(e => e.id === rec.id);
+  i >= 0 ? db.episodes[i] = rec : db.episodes.push(rec);
+  save();
+});
+$("#epDelete").onclick = () => {
+  if (!confirm("Удалить эпизод?")) return;
+  db.episodes = db.episodes.filter(e => e.id !== editingId);
+  $("#dlgEpisode").close();
+  save();
+};
+
+// ---------- события ----------
+let evKind, evSel;
+function openEvent(kind) {
+  evKind = kind;
+  const f = $("#formEvent");
+  f.reset();
+  f.date.value = todayISO();
+  evSel = new Set();
+  const water = kind === "water";
+  $("#evWaterWrap").classList.toggle("hidden", !water);
+  $("#evChoiceWrap").classList.toggle("hidden", water);
+  $("#waterVal").textContent = f.water.value;
+  $("#evTitle").textContent = { trigger: "Событие / триггер", proph: "Профилактика", water: "Вода за день" }[kind];
+  $("#evChoiceLabel").textContent = kind === "proph" ? "Что приняли" : "Что было";
+  if (!water) chips($("#evChoices"), kind === "proph" ? PROPHYLAXIS : TRIGGERS, evSel);
+  $("#dlgEvent").showModal();
+}
+$("#formEvent").water.oninput = e => $("#waterVal").textContent = e.target.value;
+$("#formEvent").addEventListener("submit", ev => {
+  if (ev.submitter?.value !== "save") return;
+  const f = $("#formEvent");
+  const base = { date: f.date.value, note: f.note.value.trim() };
+  if (evKind === "water") db.events.push({ id: uid(), kind: "water", value: +f.water.value, ...base });
+  else for (const k of evSel) db.events.push({ id: uid(), kind: evKind, key: k, ...base });
+  save();
+});
+function deleteEvent(id) {
+  if (!confirm("Удалить запись?")) return;
+  db.events = db.events.filter(e => e.id !== id);
+  save();
+}
+
+// ---------- отрисовка ----------
+function evText(e) {
+  if (e.kind === "water") return "💧 Вода: " + e.value + " л";
+  if (e.kind === "proph") return "💊 " + label(PROPHYLAXIS, e.key);
+  return "📌 " + label(TRIGGERS, e.key);
+}
+function episodeCard(ep, clickable = true) {
+  const dur = ep.end ? daysBetween(ep.start, ep.end) + 1 + " дн." : "идёт";
+  const flags = ep.symptoms.some(k => SYMPTOMS.find(s => s[0] === k)?.[2]);
+  const meta = [ep.treatment, TEST[ep.test], OUTCOME[ep.outcome]].filter(Boolean).map(esc).join(" · ");
+  return `<div class="card" ${clickable ? `data-ep="${ep.id}"` : ""}>
+    <div class="item"><div><b>${fmt(ep.start)}</b> ${flags ? "⚠" : ""}<br>
+    <small>${dur} · тяжесть ${ep.severity}/10${ep.triggers.length ? " · " + esc(ep.triggers.map(t => label(TRIGGERS, t)).join(", ")) : ""}</small>
+    ${meta ? `<br><small>${meta}</small>` : ""}</div></div></div>`;
+}
+function render() {
+  $("#today").textContent = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+  const eps = [...db.episodes].sort((a, b) => b.start.localeCompare(a.start));
+  const active = eps.find(e => !e.end);
+
+  // активный эпизод
+  $("#activeBox").innerHTML = active ? `<div class="card active">
+      <b>Идёт эпизод — день ${daysBetween(active.start, todayISO()) + 1}</b>
+      <div class="muted">с ${fmt(active.start)}${active.treatment ? " · " + esc(active.treatment) : ""}</div>
+      <div class="grid2" style="margin-top:10px">
+        <button class="secondary" data-ep="${active.id}">Изменить</button>
+        <button id="btnFinish">Закончился</button>
+      </div></div>` : "";
+  const fin = $("#btnFinish");
+  if (fin) fin.onclick = () => { active.end = todayISO(); save(); };
+  $("#btnEpisode").classList.toggle("hidden", !!active);
+
+  // статистика
+  const last = eps[0];
+  $("#sDays").textContent = active ? "0" : last ? daysBetween(last.end || last.start, todayISO()) : "—";
+  const n6 = eps.filter(e => e.start >= monthsAgo(6)).length;
+  const n12 = eps.filter(e => e.start >= monthsAgo(12)).length;
+  $("#s6").textContent = n6; $("#s12").textContent = n12;
+  $("#recurrence").innerHTML = (n6 >= 2 || n12 >= 3)
+    ? `<span class="badge warn">Подходит под «рецидивирующий» — обсудите профилактику с урологом</span>`
+    : eps.length ? `<span class="badge ok">Ниже порога рецидивирующего (2 за 6 мес / 3 за год)</span>` : "";
+
+  // последние записи
+  const recent = [
+    ...eps.slice(0, 5).map(e => ({ date: e.start, html: `🩺 Эпизод${e.end ? "" : " (идёт)"}` })),
+    ...db.events.map(e => ({ date: e.date, html: esc(evText(e)) + (e.note ? ` <small>— ${esc(e.note)}</small>` : "") })),
+  ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  $("#recent").innerHTML = recent.length
+    ? `<div class="card">${recent.map(r => `<div class="item" style="padding:4px 0"><span>${r.html}</span><small>${fmt(r.date)}</small></div>`).join("")}</div>`
+    : `<p class="muted">Пока пусто. Записывайте эпизоды и возможные триггеры — через пару месяцев станут видны закономерности.</p>`;
+
+  // история
+  $("#episodes").innerHTML = eps.length ? eps.map(e => episodeCard(e)).join("") : `<p class="muted">Эпизодов нет.</p>`;
+  const evs = [...db.events].sort((a, b) => b.date.localeCompare(a.date));
+  $("#events").innerHTML = evs.length ? `<div class="card">${evs.map(e =>
+    `<div class="item" style="padding:4px 0"><span>${esc(evText(e))}${e.note ? ` <small>— ${esc(e.note)}</small>` : ""}<br><small>${fmt(e.date)}</small></span>
+     <button class="ghost" data-del="${e.id}">✕</button></div>`).join("")}</div>` : `<p class="muted">Записей нет.</p>`;
+
+  document.querySelectorAll("[data-ep]").forEach(el => el.onclick = () => openEpisode(db.episodes.find(e => e.id === el.dataset.ep)));
+  document.querySelectorAll("[data-del]").forEach(el => el.onclick = () => deleteEvent(el.dataset.del));
+}
+
+// ---------- отчёт ----------
+function report() {
+  const from = monthsAgo(12);
+  const eps = db.episodes.filter(e => e.start >= from).sort((a, b) => a.start.localeCompare(b.start));
+  const lines = [`Дневник цистита: сводка с ${fmt(from)} по ${fmt(todayISO())}`, "",
+    `Эпизодов за 12 мес: ${eps.length}, за 6 мес: ${eps.filter(e => e.start >= monthsAgo(6)).length}`, ""];
+  for (const e of eps) {
+    lines.push(`• ${fmt(e.start)}${e.end ? " – " + fmt(e.end) : " (идёт)"}, тяжесть ${e.severity}/10`);
+    if (e.symptoms.length) lines.push("  Симптомы: " + e.symptoms.map(s => label(SYMPTOMS, s)).join(", "));
+    if (e.triggers.length) lines.push("  Возможная причина: " + e.triggers.map(s => label(TRIGGERS, s)).join(", "));
+    if (e.treatment) lines.push("  Лечение: " + e.treatment + (e.outcome ? ` (${OUTCOME[e.outcome]})` : ""));
+    if (e.test) lines.push("  Анализ: " + TEST[e.test]);
+    if (e.note) lines.push("  " + e.note);
+  }
+  const counts = {};
+  for (const e of db.events.filter(e => e.date >= from && e.kind === "proph")) counts[e.key] = (counts[e.key] || 0) + 1;
+  if (Object.keys(counts).length) {
+    lines.push("", "Профилактика (дней с приёмом):");
+    for (const [k, n] of Object.entries(counts)) lines.push(`  ${label(PROPHYLAXIS, k)}: ${n}`);
+  }
+  const trig = {};
+  for (const e of eps) for (const t of e.triggers) trig[t] = (trig[t] || 0) + 1;
+  if (Object.keys(trig).length) {
+    lines.push("", "Чаще всего перед эпизодом:");
+    Object.entries(trig).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => lines.push(`  ${label(TRIGGERS, k)}: ${n} из ${eps.length}`));
+  }
+  return lines.join("\n");
+}
+
+// ---------- кнопки ----------
+$("#btnEpisode").onclick = () => openEpisode(null);
+$("#btnEvent").onclick = () => openEvent("trigger");
+$("#btnProph").onclick = () => openEvent("proph");
+$("#btnWater").onclick = () => openEvent("water");
+document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("secondary", x !== b));
+  for (const t of ["home", "history", "settings"]) $("#tab-" + t).classList.toggle("hidden", t !== b.dataset.tab);
+});
+$("#btnExport").onclick = async () => {
+  const name = `cystitis-backup-${todayISO()}.json`;
+  const file = new File([JSON.stringify(db, null, 1)], name, { type: "application/json" });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = name; a.click();
+};
+$("#btnImport").onclick = () => $("#importFile").click();
+$("#importFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!Array.isArray(data.episodes) || !Array.isArray(data.events)) throw new Error("не тот формат");
+    if (!confirm(`Заменить текущие данные копией (${data.episodes.length} эпизодов)?`)) return;
+    db = data; save();
+  } catch (err) { alert("Не удалось прочитать файл: " + err.message); }
+  e.target.value = "";
+};
+$("#btnReport").onclick = () => { const t = $("#reportOut"); t.value = report(); t.classList.remove("hidden"); t.select(); };
+
+render();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if (navigator.storage?.persist) navigator.storage.persist();
+</script>
+</body>
+</html>
