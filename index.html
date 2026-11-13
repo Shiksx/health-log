@@ -88,10 +88,37 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .strip { display: grid; grid-template-columns: repeat(14, 1fr); gap: 3px; margin-top: 8px; }
 .dot { aspect-ratio: 1; border-radius: 6px; background: var(--line); }
 .strip-l { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+#lock {
+  position: fixed; inset: 0; z-index: 100; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: env(safe-area-inset-top) 24px env(safe-area-inset-bottom);
+}
+body.locked main, body.locked dialog { visibility: hidden; }
+#lockTitle { font-size: 20px; font-weight: 600; margin-bottom: 4px; text-align: center; }
+#lockMsg { min-height: 20px; font-size: 14px; color: var(--muted); text-align: center; }
+#lockMsg.err { color: var(--danger); }
+.pin-dots { display: flex; gap: 14px; margin: 20px 0 28px; }
+.pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent); }
+.pin-dots i.on { background: var(--accent); }
+.keypad { display: grid; grid-template-columns: repeat(3, 72px); gap: 14px; }
+.keypad button { width: 72px; height: 72px; border-radius: 50%; font-size: 26px; font-weight: 500; background: var(--card); color: var(--text); border: 1px solid var(--line); }
+.keypad button.fn { background: transparent; border: 0; font-size: 15px; color: var(--muted); }
+.shake { animation: shake .35s; }
+@keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
 .banner { background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-top: 10px; }
 </style>
 </head>
 <body>
+<script>
+  // До отрисовки: если задан PIN — сразу прячем содержимое, чтобы не мелькнуло.
+  try { if (localStorage.getItem("cystitis-diary-v1-pin")) document.body.classList.add("locked"); } catch {}
+</script>
+<div id="lock" class="hidden">
+  <div id="lockTitle">Введите PIN</div>
+  <div id="lockMsg"></div>
+  <div class="pin-dots" id="pinDots"></div>
+  <div class="keypad" id="keypad"></div>
+</div>
 <main>
   <h1>Дневник</h1>
   <div class="muted" id="today"></div>
@@ -166,6 +193,10 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
       <button class="secondary" id="btnImport">Восстановить</button>
     </div>
     <input type="file" id="importFile" accept="application/json" class="hidden">
+    <h2>Защита</h2>
+    <p class="muted" id="pinState"></p>
+    <div class="grid2" id="pinButtons"></div>
+    <p class="muted" style="font-size:13px">PIN закрывает приложение от посторонних глаз при открытии и после минуты в фоне. Восстановить забытый PIN нельзя — только стереть данные и вернуть их из резервной копии.</p>
     <h2>Для врача</h2>
     <button class="secondary" id="btnReport" style="width:100%">Сводка за 12 месяцев (текст)</button>
     <textarea id="reportOut" class="hidden" style="min-height:240px;margin-top:8px" readonly></textarea>
@@ -793,6 +824,125 @@ function report() {
   }
   return lines.join("\n");
 }
+
+// ---------- PIN ----------
+// Хранится только солёный хэш PIN, сам PIN нигде не сохраняется.
+const PIN_KEY = KEY + "-pin";
+const PIN_LEN = 4;
+const LOCK_AFTER_MS = 60 * 1000;
+const getPin = () => { try { return JSON.parse(localStorage.getItem(PIN_KEY)); } catch { return null; } };
+async function hashPin(pin, salt) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(salt + ":" + pin));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function checkPin(pin) { const p = getPin(); return !!p && await hashPin(pin, p.salt) === p.hash; }
+async function storePin(pin) {
+  const salt = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, "0")).join("");
+  localStorage.setItem(PIN_KEY, JSON.stringify({ salt, hash: await hashPin(pin, salt) }));
+}
+
+let lockMode = null, entered = "", firstPin = "", fails = 0, blockedUntil = 0, onPinDone = null, hiddenAt = 0;
+const LOCK_TITLES = { unlock: "Введите PIN", old: "Введите текущий PIN", new1: "Придумайте PIN из 4 цифр", new2: "Повторите PIN" };
+function showLock(mode, done) {
+  lockMode = mode; entered = ""; onPinDone = done || null;
+  $("#lockTitle").textContent = LOCK_TITLES[mode];
+  setLockMsg("");
+  $("#lock").classList.remove("hidden");
+  document.body.classList.add("locked");
+  document.querySelectorAll("dialog[open]").forEach(d => d.close());
+  drawKeypad(); drawDots();
+}
+function hideLock() {
+  lockMode = null; entered = "";
+  $("#lock").classList.add("hidden");
+  document.body.classList.remove("locked");
+}
+function setLockMsg(text, err) { const m = $("#lockMsg"); m.textContent = text; m.classList.toggle("err", !!err); }
+function drawDots() { $("#pinDots").innerHTML = Array.from({ length: PIN_LEN }, (_, i) => `<i class="${i < entered.length ? "on" : ""}"></i>`).join(""); }
+function drawKeypad() {
+  const left = lockMode === "unlock" ? ["forgot", "Забыли?"] : ["cancel", "Отмена"];
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", left, "0", ["back", "⌫"]];
+  const pad = $("#keypad");
+  pad.innerHTML = "";
+  for (const k of keys) {
+    const b = document.createElement("button");
+    b.type = "button";
+    if (Array.isArray(k)) { b.className = "fn"; b.textContent = k[1]; b.onclick = () => keyFn(k[0]); }
+    else { b.textContent = k; b.onclick = () => keyDigit(k); }
+    pad.appendChild(b);
+  }
+}
+function shake() { const d = $("#pinDots"); d.classList.remove("shake"); void d.offsetWidth; d.classList.add("shake"); }
+function keyFn(k) {
+  if (k === "back") { entered = entered.slice(0, -1); drawDots(); }
+  if (k === "cancel") { hideLock(); }
+  if (k === "forgot") forgotPin();
+}
+async function keyDigit(d) {
+  if (Date.now() < blockedUntil) return;
+  if (entered.length >= PIN_LEN) return;
+  entered += d; drawDots();
+  if (entered.length < PIN_LEN) return;
+  const pin = entered;
+  if (lockMode === "unlock" || lockMode === "old") {
+    if (await checkPin(pin)) {
+      fails = 0;
+      const done = onPinDone;
+      if (lockMode === "unlock") hideLock();
+      done ? done() : null;
+      return;
+    }
+    fails++;
+    entered = ""; shake(); drawDots();
+    if (fails >= 5) {
+      blockedUntil = Date.now() + 30000;
+      setLockMsg("Слишком много попыток. Подождите 30 секунд.", true);
+      setTimeout(() => setLockMsg(""), 30000);
+    } else setLockMsg("Неверный PIN", true);
+  } else if (lockMode === "new1") {
+    firstPin = pin; lockMode = "new2"; entered = "";
+    $("#lockTitle").textContent = LOCK_TITLES.new2; setLockMsg(""); drawDots();
+  } else if (lockMode === "new2") {
+    if (pin !== firstPin) {
+      lockMode = "new1"; entered = ""; firstPin = "";
+      $("#lockTitle").textContent = LOCK_TITLES.new1; setLockMsg("PIN не совпал, попробуйте ещё раз", true); shake(); drawDots();
+      return;
+    }
+    await storePin(pin);
+    firstPin = "";
+    hideLock(); renderPinSettings();
+    alert("PIN установлен");
+  }
+}
+function forgotPin() {
+  if (!confirm("Восстановить PIN нельзя. Можно стереть все записи на этом телефоне и затем вернуть их из резервной копии (раздел «Данные» → «Восстановить»). Стереть?")) return;
+  if (prompt("Чтобы подтвердить, напишите слово СТЕРЕТЬ") !== "СТЕРЕТЬ") return;
+  Object.keys(localStorage).filter(k => k.startsWith(KEY)).forEach(k => localStorage.removeItem(k));
+  location.reload();
+}
+function renderPinSettings() {
+  const has = !!getPin();
+  $("#pinState").textContent = has ? "🔒 PIN включён" : "PIN не установлен";
+  const box = $("#pinButtons");
+  box.innerHTML = "";
+  const add = (text, cls, fn) => { const b = document.createElement("button"); b.textContent = text; if (cls) b.className = cls; b.onclick = fn; box.appendChild(b); };
+  if (!has) add("Установить PIN", "", () => showLock("new1"));
+  else {
+    add("Сменить PIN", "secondary", () => showLock("old", () => { lockMode = "new1"; entered = ""; $("#lockTitle").textContent = LOCK_TITLES.new1; drawKeypad(); drawDots(); }));
+    add("Отключить", "danger", () => showLock("old", () => { localStorage.removeItem(PIN_KEY); hideLock(); renderPinSettings(); }));
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (getPin() && !lockMode && hiddenAt && Date.now() - hiddenAt > LOCK_AFTER_MS) showLock("unlock");
+});
+document.addEventListener("keydown", e => {
+  if (!lockMode) return;
+  if (/^\d$/.test(e.key)) keyDigit(e.key);
+  if (e.key === "Backspace") keyFn("back");
+});
+renderPinSettings();
+if (getPin()) showLock("unlock");
 
 // ---------- кнопки ----------
 $("#btnEpisode").onclick = () => openEpisode(null);
