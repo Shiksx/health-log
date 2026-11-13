@@ -1,5 +1,5 @@
 // Офлайн-кэш: сначала сеть (чтобы обновления приходили), при её отсутствии — кэш.
-const CACHE = "cystitis-v2";
+const CACHE = "diary-v3";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));

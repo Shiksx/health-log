@@ -1,6 +1,6 @@
 {
-  "name": "Дневник цистита",
-  "short_name": "Цистит",
+  "name": "Дневник",
+  "short_name": "Дневник",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
