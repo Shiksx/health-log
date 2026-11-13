@@ -81,6 +81,14 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .tabs { display: flex; gap: 6px; margin-top: 12px; }
 .tabs button { flex: 1; padding: 10px; }
 .hidden { display: none !important; }
+.faces { display: flex; justify-content: space-between; gap: 4px; margin-top: 8px; }
+.face { flex: 1; font-size: 28px; padding: 8px 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.face.on { background: var(--accent-soft); border: 2px solid var(--accent); }
+.face small { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
+.strip { display: grid; grid-template-columns: repeat(14, 1fr); gap: 3px; margin-top: 8px; }
+.dot { aspect-ratio: 1; border-radius: 6px; background: var(--line); }
+.strip-l { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.banner { background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -96,6 +104,8 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 
   <!-- ГЛАВНАЯ -->
   <section id="tab-home">
+    <div id="backupBanner"></div>
+    <div class="card" id="dailyCard"></div>
     <div id="activeBox"></div>
 
     <div class="stats" style="margin-top:12px">
@@ -119,6 +129,8 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 
   <!-- ИСТОРИЯ -->
   <section id="tab-history" class="hidden">
+    <h2>Самочувствие по дням</h2>
+    <div id="days"></div>
     <h2>Эпизоды</h2>
     <div id="episodes"></div>
     <h2>События и профилактика</h2>
@@ -183,6 +195,25 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   </form>
 </dialog>
 
+<!-- ДИАЛОГ: ДЕНЬ -->
+<dialog id="dlgDay">
+  <form method="dialog" id="formDay">
+    <div class="dlg-head"><h2>Как вы сегодня?</h2><button class="ghost" value="cancel">✕</button></div>
+    <label>Дата</label>
+    <input type="date" name="date" required>
+    <div class="faces" id="dayFaces"></div>
+    <label>Что беспокоит (если что-то есть)</label>
+    <div class="chips" id="daySymptoms"></div>
+    <div id="dayAlert" class="alert hidden"></div>
+    <label>Вода: <b id="dayWaterVal">—</b></label>
+    <input type="range" name="water" min="0" max="4" step="0.25" value="0">
+    <label>Заметка</label>
+    <input name="note">
+    <div id="dayEpisodeHint" class="banner hidden">Похоже на начало эпизода. После сохранения можно его отметить.</div>
+    <div class="actions"><button value="save">Сохранить</button></div>
+  </form>
+</dialog>
+
 <!-- ДИАЛОГ: СОБЫТИЕ / ПРОФИЛАКТИКА / ВОДА -->
 <dialog id="dlgEvent">
   <form method="dialog" id="formEvent">
@@ -228,10 +259,31 @@ const TEST = { "": "", pending: "ждём анализ", positive: "бактер
 const OUTCOME = { "": "", yes: "помогло", partial: "частично", no: "не помогло" };
 
 // ---------- хранилище ----------
+// Ключ хранилища не меняется между версиями. Формат данных — поле version.
 const KEY = "cystitis-diary-v1";
+const DATA_VERSION = 2;
+const empty = () => ({ version: DATA_VERSION, episodes: [], events: [], days: {}, lastBackup: null });
+
+// Миграции: каждая переводит данные из версии N в N+1, ничего не удаляя.
+const MIGRATIONS = {
+  1: d => ({ ...d, days: d.days || {}, lastBackup: d.lastBackup || null, version: 2 }),
+};
+function migrate(d) {
+  const from = d.version || 1;
+  if (from >= DATA_VERSION) return d;
+  // перед изменением формата — копия старых данных рядом
+  try { localStorage.setItem(KEY + "-before-v" + DATA_VERSION, JSON.stringify(d)); } catch {}
+  let v = from;
+  while (v < DATA_VERSION) { d = MIGRATIONS[v](d); v++; }
+  return d;
+}
 function load() {
-  try { return JSON.parse(localStorage.getItem(KEY)) || { episodes: [], events: [] }; }
-  catch { return { episodes: [], events: [] }; }
+  let raw;
+  try { raw = JSON.parse(localStorage.getItem(KEY)); } catch { raw = null; }
+  if (!raw) return empty();
+  const d = migrate(raw);
+  if (d !== raw) localStorage.setItem(KEY, JSON.stringify(d));
+  return d;
 }
 let db = load();
 function save() {
@@ -279,12 +331,12 @@ function redFlagCheck() {
     : "⚠ Кровь в моче — стоит показаться врачу и сдать анализ.";
   box.classList.remove("hidden");
 }
-function openEpisode(ep) {
+function openEpisode(ep, startDate, presetSymptoms) {
   const f = $("#formEpisode");
   f.reset();
   editingId = ep ? ep.id : null;
   $("#epTitle").textContent = ep ? "Эпизод" : "Новый эпизод";
-  f.start.value = ep ? ep.start : todayISO();
+  f.start.value = ep ? ep.start : (startDate || todayISO());
   f.end.value = ep?.end || "";
   f.severity.value = ep?.severity || 5;
   $("#sevVal").textContent = f.severity.value;
@@ -292,7 +344,7 @@ function openEpisode(ep) {
   f.test.value = ep?.test || "";
   f.outcome.value = ep?.outcome || "";
   f.note.value = ep?.note || "";
-  epSym = new Set(ep?.symptoms || []);
+  epSym = new Set(ep?.symptoms || presetSymptoms || []);
   epTrig = new Set(ep?.triggers || []);
   chips($("#epSymptoms"), SYMPTOMS, epSym, redFlagCheck);
   chips($("#epTriggers"), TRIGGERS, epTrig);
@@ -320,6 +372,70 @@ $("#epDelete").onclick = () => {
   $("#dlgEpisode").close();
   save();
 };
+
+// ---------- ежедневный опрос ----------
+// score: 1 = отлично … 5 = очень плохо
+const FACES = [[1, "😊", "отлично"], [2, "🙂", "хорошо"], [3, "😐", "так себе"], [4, "😣", "плохо"], [5, "😫", "ужасно"]];
+const SCORE_COLOR = { 1: "#43a047", 2: "#9ccc65", 3: "#fdd835", 4: "#fb8c00", 5: "#e53935" };
+let daySym, dayScore;
+function dayFlagCheck() {
+  const kidney = daySym.has("fever") || daySym.has("back_pain") || daySym.has("chills");
+  const box = $("#dayAlert");
+  box.classList.toggle("hidden", !(kidney || daySym.has("blood")));
+  box.textContent = kidney ? "⚠ Возможна инфекция почек — обратитесь к врачу сегодня."
+    : "⚠ Кровь в моче — стоит показаться врачу и сдать анализ.";
+  const active = db.episodes.some(e => !e.end);
+  const looksLike = daySym.has("burning") || daySym.has("frequency") || daySym.has("urgency");
+  $("#dayEpisodeHint").classList.toggle("hidden", active || !looksLike);
+}
+function renderFaces(container, current, onPick) {
+  container.innerHTML = "";
+  for (const [v, emoji, text] of FACES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "face" + (current === v ? " on" : "");
+    b.innerHTML = `${emoji}<small>${text}</small>`;
+    b.onclick = () => onPick(v);
+    container.appendChild(b);
+  }
+}
+function openDay(date, score) {
+  const f = $("#formDay");
+  f.reset();
+  date = date || todayISO();
+  const d = db.days[date] || {};
+  f.date.value = date;
+  dayScore = score || d.score || null;
+  daySym = new Set(d.symptoms || []);
+  f.water.value = d.water ?? 0;
+  $("#dayWaterVal").textContent = d.water ? d.water + " л" : "—";
+  f.note.value = d.note || "";
+  const pick = v => { dayScore = v; renderFaces($("#dayFaces"), v, pick); };
+  renderFaces($("#dayFaces"), dayScore, pick);
+  chips($("#daySymptoms"), SYMPTOMS, daySym, dayFlagCheck);
+  dayFlagCheck();
+  $("#dlgDay").showModal();
+}
+$("#formDay").water.oninput = e => $("#dayWaterVal").textContent = +e.target.value ? e.target.value + " л" : "—";
+$("#formDay").date.onchange = e => { $("#dlgDay").close(); openDay(e.target.value); };
+$("#formDay").addEventListener("submit", ev => {
+  if (ev.submitter?.value !== "save") return;
+  const f = $("#formDay");
+  if (!dayScore) { ev.preventDefault(); alert("Выберите, как вы себя чувствуете"); return; }
+  const suggestEpisode = !$("#dayEpisodeHint").classList.contains("hidden");
+  db.days[f.date.value] = {
+    score: dayScore, symptoms: [...daySym],
+    water: +f.water.value || null, note: f.note.value.trim(),
+  };
+  save();
+  if (suggestEpisode && confirm("Отметить начало эпизода?")) openEpisode(null, f.date.value, [...daySym]);
+});
+function quickDay(score) {
+  const t = todayISO();
+  db.days[t] = { ...(db.days[t] || { symptoms: [], water: null, note: "" }), score };
+  save();
+  if (score >= 3) openDay(t, score); // если плохо — сразу спросить, что именно
+}
 
 // ---------- события ----------
 let evKind, evSel;
@@ -368,8 +484,54 @@ function episodeCard(ep, clickable = true) {
     <small>${dur} · тяжесть ${ep.severity}/10${ep.triggers.length ? " · " + esc(ep.triggers.map(t => label(TRIGGERS, t)).join(", ")) : ""}</small>
     ${meta ? `<br><small>${meta}</small>` : ""}</div></div></div>`;
 }
+function dayLine(date, d) {
+  const face = FACES.find(f => f[0] === d.score);
+  const parts = [d.symptoms.map(s => label(SYMPTOMS, s)).join(", "), d.water ? "💧 " + d.water + " л" : "", d.note].filter(Boolean);
+  return `<div class="item" style="padding:4px 0" data-day="${date}"><span>${face ? face[1] + " " + face[2] : ""}${parts.length ? `<br><small>${esc(parts.join(" · "))}</small>` : ""}</span><small>${fmt(date)}</small></div>`;
+}
+function renderDaily() {
+  const t = todayISO();
+  const d = db.days[t];
+  const card = $("#dailyCard");
+  if (d) {
+    const face = FACES.find(f => f[0] === d.score);
+    card.innerHTML = `<div class="item"><span><b>Сегодня: ${face[1]} ${face[2]}</b>
+      ${d.symptoms.length ? `<br><small>${esc(d.symptoms.map(s => label(SYMPTOMS, s)).join(", "))}</small>` : ""}</span>
+      <button class="ghost" id="dayEdit">изменить</button></div>`;
+    $("#dayEdit").onclick = () => openDay(t);
+  } else {
+    card.innerHTML = `<b>Как вы сегодня?</b><div class="faces" id="quickFaces"></div>`;
+    renderFaces($("#quickFaces"), null, quickDay);
+  }
+  // полоса за 14 дней
+  const cells = [];
+  for (let i = 13; i >= 0; i--) {
+    const x = new Date(); x.setDate(x.getDate() - i); x.setMinutes(x.getMinutes() - x.getTimezoneOffset());
+    const iso = x.toISOString().slice(0, 10);
+    const s = db.days[iso]?.score;
+    const inEp = db.episodes.some(e => e.start <= iso && (e.end || t) >= iso);
+    cells.push(`<div class="dot" title="${fmt(iso)}" data-day="${iso}" style="${s ? `background:${SCORE_COLOR[s]};` : ""}${inEp ? "outline:2px solid var(--danger);outline-offset:-2px;" : ""}"></div>`);
+  }
+  card.insertAdjacentHTML("beforeend", `<div class="strip">${cells.join("")}</div>
+    <div class="strip-l"><span>2 недели назад</span><span>сегодня</span></div>`);
+}
+function renderBackupBanner() {
+  const has = db.episodes.length || db.events.length || Object.keys(db.days).length;
+  const last = db.lastBackup;
+  const old = !last || daysBetween(last, todayISO()) >= 30;
+  $("#backupBanner").innerHTML = has && old
+    ? `<div class="banner">💾 ${last ? "Последняя копия — " + fmt(last) : "Копия данных ещё не сохранялась"}. <a href="#" id="goBackup" style="color:inherit;font-weight:600">Сохранить</a></div>` : "";
+  const g = $("#goBackup");
+  if (g) g.onclick = e => { e.preventDefault(); document.querySelector('[data-tab="settings"]').click(); };
+}
 function render() {
   $("#today").textContent = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+  renderDaily();
+  renderBackupBanner();
+  const dayKeys = Object.keys(db.days).sort().reverse();
+  $("#days").innerHTML = dayKeys.length
+    ? `<div class="card">${dayKeys.slice(0, 60).map(k => dayLine(k, db.days[k])).join("")}</div>`
+    : `<p class="muted">Пока нет отметок.</p>`;
   const eps = [...db.episodes].sort((a, b) => b.start.localeCompare(a.start));
   const active = eps.find(e => !e.end);
 
@@ -413,6 +575,7 @@ function render() {
 
   document.querySelectorAll("[data-ep]").forEach(el => el.onclick = () => openEpisode(db.episodes.find(e => e.id === el.dataset.ep)));
   document.querySelectorAll("[data-del]").forEach(el => el.onclick = () => deleteEvent(el.dataset.del));
+  document.querySelectorAll("[data-day]").forEach(el => el.onclick = () => openDay(el.dataset.day));
 }
 
 // ---------- отчёт ----------
@@ -435,6 +598,14 @@ function report() {
     lines.push("", "Профилактика (дней с приёмом):");
     for (const [k, n] of Object.entries(counts)) lines.push(`  ${label(PROPHYLAXIS, k)}: ${n}`);
   }
+  const days = Object.entries(db.days).filter(([k]) => k >= from);
+  if (days.length) {
+    const bad = days.filter(([, d]) => d.score >= 4).length;
+    const withSym = days.filter(([, d]) => d.symptoms.length).length;
+    const w = days.map(([, d]) => d.water).filter(Boolean);
+    lines.push("", `Ежедневные отметки: ${days.length} дн., из них плохих (😣/😫): ${bad}, с симптомами: ${withSym}`);
+    if (w.length) lines.push(`  Вода в среднем: ${(w.reduce((a, b) => a + b, 0) / w.length).toFixed(1)} л/день`);
+  }
   const trig = {};
   for (const e of eps) for (const t of e.triggers) trig[t] = (trig[t] || 0) + 1;
   if (Object.keys(trig).length) {
@@ -448,13 +619,14 @@ function report() {
 $("#btnEpisode").onclick = () => openEpisode(null);
 $("#btnEvent").onclick = () => openEvent("trigger");
 $("#btnProph").onclick = () => openEvent("proph");
-$("#btnWater").onclick = () => openEvent("water");
+$("#btnWater").onclick = () => openDay(todayISO());
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
   document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("secondary", x !== b));
   for (const t of ["home", "history", "settings"]) $("#tab-" + t).classList.toggle("hidden", t !== b.dataset.tab);
 });
 $("#btnExport").onclick = async () => {
-  const name = `cystitis-backup-${todayISO()}.json`;
+  const name = `diary-backup-${todayISO()}.json`;
+  db.lastBackup = todayISO(); save();
   const file = new File([JSON.stringify(db, null, 1)], name, { type: "application/json" });
   if (navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === "AbortError") return; }
@@ -468,8 +640,10 @@ $("#importFile").onchange = async e => {
   try {
     const data = JSON.parse(await f.text());
     if (!Array.isArray(data.episodes) || !Array.isArray(data.events)) throw new Error("не тот формат");
-    if (!confirm(`Заменить текущие данные копией (${data.episodes.length} эпизодов)?`)) return;
-    db = data; save();
+    if ((data.version || 1) > DATA_VERSION) throw new Error("копия из более новой версии приложения — обновите страницу");
+    if (!confirm(`Заменить текущие данные копией (${data.episodes.length} эпизодов, ${Object.keys(data.days || {}).length} дней)?`)) return;
+    try { localStorage.setItem(KEY + "-before-import", JSON.stringify(db)); } catch {}
+    db = migrate(data); save();
   } catch (err) { alert("Не удалось прочитать файл: " + err.message); }
   e.target.value = "";
 };
