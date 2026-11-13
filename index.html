@@ -99,6 +99,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   <div class="tabs">
     <button data-tab="home">Главная</button>
     <button data-tab="history" class="secondary">История</button>
+    <button data-tab="exp" class="secondary">Опыт</button>
     <button data-tab="settings" class="secondary">Данные</button>
   </div>
 
@@ -135,6 +136,25 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
     <div id="episodes"></div>
     <h2>События и профилактика</h2>
     <div id="events"></div>
+  </section>
+
+  <!-- ЭКСПЕРИМЕНТ -->
+  <section id="tab-exp" class="hidden">
+    <div id="expActive"></div>
+    <div id="expStart">
+      <h2>Новый эксперимент</h2>
+      <p class="muted">Меняйте что-то одно на 2–4 недели и продолжайте отмечать самочувствие каждый день. В конце приложение сравнит этот период с таким же по длине периодом до него.</p>
+      <label>Что меняем</label>
+      <div class="chips" id="expPresets"></div>
+      <input id="expTitle" placeholder="или своё: напр. «без помидоров»" style="margin-top:8px">
+      <label>Длительность: <b id="expDaysVal">21</b> дн.</label>
+      <input type="range" id="expDays" min="7" max="42" step="7" value="21">
+      <button id="btnExpStart" style="width:100%;margin-top:12px">Начать</button>
+    </div>
+    <h2>Еда и самочувствие</h2>
+    <div id="foodStats"></div>
+    <h2>Прошлые эксперименты</h2>
+    <div id="expPast"></div>
   </section>
 
   <!-- ДАННЫЕ -->
@@ -205,6 +225,10 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
     <label>Что беспокоит (если что-то есть)</label>
     <div class="chips" id="daySymptoms"></div>
     <div id="dayAlert" class="alert hidden"></div>
+    <label>Сладкое сегодня</label>
+    <div class="chips" id="daySweets"></div>
+    <label>Что ещё было в еде и питье</label>
+    <div class="chips" id="dayFoods"></div>
     <label>Вода: <b id="dayWaterVal">—</b></label>
     <input type="range" name="water" min="0" max="4" step="0.25" value="0">
     <label>Заметка</label>
@@ -260,12 +284,13 @@ const OUTCOME = { "": "", yes: "помогло", partial: "частично", no
 // ---------- хранилище ----------
 // Ключ хранилища не меняется между версиями. Формат данных — поле version.
 const KEY = "cystitis-diary-v1";
-const DATA_VERSION = 2;
-const empty = () => ({ version: DATA_VERSION, episodes: [], events: [], days: {}, lastBackup: null });
+const DATA_VERSION = 3;
+const empty = () => ({ version: DATA_VERSION, episodes: [], events: [], days: {}, experiments: [], lastBackup: null });
 
 // Миграции: каждая переводит данные из версии N в N+1, ничего не удаляя.
 const MIGRATIONS = {
   1: d => ({ ...d, days: d.days || {}, lastBackup: d.lastBackup || null, version: 2 }),
+  2: d => ({ ...d, experiments: d.experiments || [], version: 3 }),
 };
 function migrate(d) {
   const from = d.version || 1;
@@ -374,6 +399,25 @@ $("#epDelete").onclick = () => {
 
 // ---------- ежедневный опрос ----------
 // score: 1 = отлично … 5 = очень плохо
+const SWEETS = [[0, "Не было"], [1, "Немного"], [2, "Как обычно"], [3, "Много"]];
+const FOODS = [
+  ["coffee", "☕ Кофе / крепкий чай"], ["alcohol", "🍷 Алкоголь"], ["spicy", "🌶 Острое"],
+  ["soda", "🥤 Газировка"], ["sour", "🍋 Цитрусы / кислое"], ["salty", "🥓 Солёное / копчёное"],
+  ["sweetener", "🧪 Сахарозаменители"], ["fastfood", "🍔 Фастфуд"],
+];
+let daySweets, dayFoods;
+function renderSweets(current) {
+  const box = $("#daySweets");
+  box.innerHTML = "";
+  for (const [v, text] of SWEETS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (current === v ? " on" : "");
+    b.textContent = text;
+    b.onclick = () => { daySweets = daySweets === v ? null : v; renderSweets(daySweets); };
+    box.appendChild(b);
+  }
+}
 const FACES = [[1, "😊", "отлично"], [2, "🙂", "хорошо"], [3, "😐", "так себе"], [4, "😣", "плохо"], [5, "😫", "ужасно"]];
 const SCORE_COLOR = { 1: "#43a047", 2: "#9ccc65", 3: "#fdd835", 4: "#fb8c00", 5: "#e53935" };
 let daySym, dayScore;
@@ -406,6 +450,10 @@ function openDay(date, score) {
   f.date.value = date;
   dayScore = score || d.score || null;
   daySym = new Set(d.symptoms || []);
+  daySweets = d.sweets ?? null;
+  dayFoods = new Set(d.foods || []);
+  renderSweets(daySweets);
+  chips($("#dayFoods"), FOODS, dayFoods);
   f.water.value = d.water ?? 0;
   $("#dayWaterVal").textContent = d.water ? d.water + " л" : "—";
   f.note.value = d.note || "";
@@ -423,7 +471,7 @@ $("#formDay").addEventListener("submit", ev => {
   if (!dayScore) { ev.preventDefault(); alert("Выберите, как вы себя чувствуете"); return; }
   const suggestEpisode = !$("#dayEpisodeHint").classList.contains("hidden");
   db.days[f.date.value] = {
-    score: dayScore, symptoms: [...daySym],
+    score: dayScore, symptoms: [...daySym], sweets: daySweets, foods: [...dayFoods],
     water: +f.water.value || null, note: f.note.value.trim(),
   };
   save();
@@ -431,10 +479,132 @@ $("#formDay").addEventListener("submit", ev => {
 });
 function quickDay(score) {
   const t = todayISO();
-  db.days[t] = { ...(db.days[t] || { symptoms: [], water: null, note: "" }), score };
+  db.days[t] = { ...(db.days[t] || { symptoms: [], sweets: null, foods: [], water: null, note: "" }), score };
   save();
-  if (score >= 3) openDay(t, score); // если плохо — сразу спросить, что именно
+  openDay(t, score); // сразу спросить про симптомы и еду (можно просто закрыть)
 }
+
+// ---------- эксперименты ----------
+const EXP_PRESETS = [
+  ["less_sweets", "Меньше сладкого"], ["no_coffee", "Без кофе"], ["no_alcohol", "Без алкоголя"],
+  ["water2", "Вода ≥ 2 л в день"], ["dmannose", "D-манноза ежедневно"], ["cranberry", "Клюква ежедневно"],
+];
+let expPreset = null;
+const addDays = (iso, n) => { const x = parse(iso); x.setDate(x.getDate() + n); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); };
+const activeExp = () => db.experiments.find(e => !e.end);
+
+/** Сводка по отметкам за период [from, to] включительно. */
+function periodStats(from, to) {
+  const ds = Object.entries(db.days).filter(([k]) => k >= from && k <= to).map(([, d]) => d);
+  const n = ds.length;
+  const pct = c => n ? Math.round(100 * ds.filter(c).length / n) : null;
+  const sw = ds.map(d => d.sweets).filter(v => v != null);
+  const w = ds.map(d => d.water).filter(Boolean);
+  return {
+    n, total: daysBetween(from, to) + 1,
+    avg: n ? (ds.reduce((a, d) => a + d.score, 0) / n) : null,
+    bad: pct(d => d.score >= 3),
+    sym: pct(d => d.symptoms.length > 0),
+    sweets: sw.length ? sw.reduce((a, b) => a + b, 0) / sw.length : null,
+    water: w.length ? w.reduce((a, b) => a + b, 0) / w.length : null,
+    episodes: db.episodes.filter(e => e.start >= from && e.start <= to).length,
+  };
+}
+function compareTable(exp) {
+  const to = exp.end || todayISO();
+  const len = daysBetween(exp.start, to) + 1;
+  const base = periodStats(addDays(exp.start, -len), addDays(exp.start, -1));
+  const cur = periodStats(exp.start, to);
+  const f = (v, d = 1, s = "") => v == null ? "—" : (+v).toFixed(d) + s;
+  const row = (name, a, b, better) => {
+    let mark = "";
+    if (better && a != null && b != null && a !== b) mark = (better === "lower" ? b < a : b > a) ? " ✅" : " ⚠";
+    return `<tr><td>${name}</td><td>${a == null ? "—" : a}</td><td><b>${b == null ? "—" : b}</b>${mark}</td></tr>`;
+  };
+  const sweetsName = v => v == null ? null : (SWEETS[Math.round(v)] || [0, "—"])[1].toLowerCase();
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px">
+    <tr class="muted"><td></td><td>до</td><td>во время</td></tr>
+    ${row("Дней с отметкой", base.n + " из " + base.total, cur.n + " из " + cur.total)}
+    ${row("Средний балл (1 — отлично)", base.avg == null ? null : f(base.avg), cur.avg == null ? null : f(cur.avg), "lower")}
+    ${row("Дней «так себе» и хуже", base.bad == null ? null : base.bad + "%", cur.bad == null ? null : cur.bad + "%", "lower")}
+    ${row("Дней с симптомами", base.sym == null ? null : base.sym + "%", cur.sym == null ? null : cur.sym + "%", "lower")}
+    ${row("Эпизодов", base.episodes, cur.episodes, "lower")}
+    ${row("Сладкое в среднем", sweetsName(base.sweets), sweetsName(cur.sweets))}
+    ${row("Вода в среднем, л", base.water == null ? null : f(base.water), cur.water == null ? null : f(cur.water))}
+  </table>`;
+  const enough = base.n >= 7 && cur.n >= 7;
+  html += `<p class="muted" style="margin-top:8px">${enough
+    ? "Небольшая разница может быть случайностью. Заметна только устойчивая разница — например, вдвое меньше плохих дней."
+    : "Мало отметок для сравнения: нужно хотя бы по 7 дней в каждом периоде. Период «до» — столько же дней перед началом эксперимента."}</p>`;
+  return html;
+}
+
+/** Еда и самочувствие: доля плохих дней, если в этот день или накануне было X, и если не было. */
+function foodStats() {
+  const keys = Object.keys(db.days).sort();
+  if (keys.length < 14) return `<p class="muted">Нужно хотя бы 2 недели ежедневных отметок (сейчас ${keys.length}).</p>`;
+  const exposed = (k, test) => test(db.days[k]) || (db.days[addDays(k, -1)] && test(db.days[addDays(k, -1)]));
+  const factors = [["Много сладкого", d => d.sweets === 3], ...FOODS.map(([key, name]) => [name, d => (d.foods || []).includes(key)])];
+  const rows = [];
+  for (const [name, test] of factors) {
+    const yes = keys.filter(k => exposed(k, test)), no = keys.filter(k => !exposed(k, test));
+    if (yes.length < 5 || no.length < 5) continue;
+    const bad = ks => Math.round(100 * ks.filter(k => db.days[k].score >= 3).length / ks.length);
+    const a = bad(yes), b = bad(no);
+    rows.push({ name, a, b, ny: yes.length, nn: no.length, diff: a - b });
+  }
+  if (!rows.length) return `<p class="muted">Пока недостаточно разнообразных дней: каждый пункт должен быть и не быть хотя бы по 5 раз.</p>`;
+  rows.sort((x, y) => y.diff - x.diff);
+  return `<div class="card"><small class="muted">Доля дней «так себе» и хуже — если в этот день или накануне было / не было</small>
+    ${rows.map(r => `<div class="item" style="padding:6px 0"><span>${esc(r.name)}<br><small>было: ${r.ny} дн. · не было: ${r.nn} дн.</small></span>
+    <span><b>${r.a}%</b> / ${r.b}%${r.diff >= 20 ? " ⚠" : ""}</span></div>`).join("")}</div>
+    <p class="muted">⚠ — заметно чаще плохо. Это подсказка, что проверить экспериментом, а не доказательство.</p>`;
+}
+
+function renderExp() {
+  const a = activeExp();
+  $("#expStart").classList.toggle("hidden", !!a);
+  if (a) {
+    const day = daysBetween(a.start, todayISO()) + 1;
+    $("#expActive").innerHTML = `<div class="card active"><b>${esc(a.title)}</b>
+      <div class="muted">с ${fmt(a.start)} · день ${day} из ${a.plannedDays}</div>
+      ${compareTable(a)}
+      <div class="grid2" style="margin-top:10px"><button class="danger" id="btnExpCancel">Отменить</button><button id="btnExpEnd">Завершить</button></div></div>`;
+    $("#btnExpEnd").onclick = () => { a.end = todayISO(); save(); };
+    $("#btnExpCancel").onclick = () => { if (confirm("Удалить этот эксперимент?")) { db.experiments = db.experiments.filter(e => e !== a); save(); } };
+  } else $("#expActive").innerHTML = "";
+  $("#foodStats").innerHTML = foodStats();
+  const past = db.experiments.filter(e => e.end).sort((x, y) => y.start.localeCompare(x.start));
+  $("#expPast").innerHTML = past.length ? past.map(e => `<div class="card"><b>${esc(e.title)}</b>
+    <div class="muted">${fmt(e.start)} – ${fmt(e.end)}</div>${compareTable(e)}</div>`).join("") : `<p class="muted">Пока не было.</p>`;
+  // плашка на главной
+  const banner = a ? `<div class="banner" id="expBanner">🧪 ${esc(a.title)} — день ${daysBetween(a.start, todayISO()) + 1} из ${a.plannedDays}${daysBetween(a.start, todayISO()) + 1 >= a.plannedDays ? " · пора подводить итог" : ""}</div>` : "";
+  $("#backupBanner").insertAdjacentHTML("beforeend", banner);
+  const b = $("#expBanner");
+  if (b) b.onclick = () => document.querySelector('[data-tab="exp"]').click();
+}
+function renderPresets() {
+  const box = $("#expPresets");
+  box.innerHTML = "";
+  for (const [, text] of EXP_PRESETS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (expPreset === text ? " on" : "");
+    b.textContent = text;
+    b.onclick = () => { expPreset = expPreset === text ? null : text; if (expPreset) $("#expTitle").value = ""; renderPresets(); };
+    box.appendChild(b);
+  }
+}
+renderPresets();
+$("#expTitle").oninput = () => { if (expPreset) { expPreset = null; renderPresets(); } };
+$("#expDays").oninput = e => $("#expDaysVal").textContent = e.target.value;
+$("#btnExpStart").onclick = () => {
+  const title = $("#expTitle").value.trim() || expPreset;
+  if (!title) { alert("Выберите, что меняем"); return; }
+  db.experiments.push({ id: uid(), title, start: todayISO(), plannedDays: +$("#expDays").value, end: null });
+  expPreset = null; $("#expTitle").value = ""; renderPresets();
+  save();
+};
 
 // ---------- события ----------
 let evKind, evSel;
@@ -485,7 +655,10 @@ function episodeCard(ep, clickable = true) {
 }
 function dayLine(date, d) {
   const face = FACES.find(f => f[0] === d.score);
-  const parts = [d.symptoms.map(s => label(SYMPTOMS, s)).join(", "), d.water ? "💧 " + d.water + " л" : "", d.note].filter(Boolean);
+  const parts = [d.symptoms.map(s => label(SYMPTOMS, s)).join(", "),
+    d.sweets != null ? "🍰 " + SWEETS[d.sweets][1].toLowerCase() : "",
+    (d.foods || []).map(k => label(FOODS, k)).join(" "),
+    d.water ? "💧 " + d.water + " л" : "", d.note].filter(Boolean);
   return `<div class="item" style="padding:4px 0" data-day="${date}"><span>${face ? face[1] + " " + face[2] : ""}${parts.length ? `<br><small>${esc(parts.join(" · "))}</small>` : ""}</span><small>${fmt(date)}</small></div>`;
 }
 function renderDaily() {
@@ -527,6 +700,7 @@ function render() {
   $("#today").textContent = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   renderDaily();
   renderBackupBanner();
+  renderExp();
   const dayKeys = Object.keys(db.days).sort().reverse();
   $("#days").innerHTML = dayKeys.length
     ? `<div class="card">${dayKeys.slice(0, 60).map(k => dayLine(k, db.days[k])).join("")}</div>`
@@ -605,6 +779,12 @@ function report() {
     lines.push("", `Ежедневные отметки: ${days.length} дн., из них плохих (😣/😫): ${bad}, с симптомами: ${withSym}`);
     if (w.length) lines.push(`  Вода в среднем: ${(w.reduce((a, b) => a + b, 0) / w.length).toFixed(1)} л/день`);
   }
+  for (const e of db.experiments.filter(e => e.start >= from)) {
+    const to = e.end || todayISO(), len = daysBetween(e.start, to) + 1;
+    const a = periodStats(addDays(e.start, -len), addDays(e.start, -1)), b = periodStats(e.start, to);
+    lines.push("", `Эксперимент «${e.title}» ${fmt(e.start)} – ${e.end ? fmt(e.end) : "идёт"}:`,
+      `  плохих дней до: ${a.bad ?? "—"}%, во время: ${b.bad ?? "—"}% (отметок ${a.n} / ${b.n})`);
+  }
   const trig = {};
   for (const e of eps) for (const t of e.triggers) trig[t] = (trig[t] || 0) + 1;
   if (Object.keys(trig).length) {
@@ -621,7 +801,7 @@ $("#btnProph").onclick = () => openEvent("proph");
 $("#btnWater").onclick = () => openDay(todayISO());
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
   document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("secondary", x !== b));
-  for (const t of ["home", "history", "settings"]) $("#tab-" + t).classList.toggle("hidden", t !== b.dataset.tab);
+  for (const t of ["home", "history", "exp", "settings"]) $("#tab-" + t).classList.toggle("hidden", t !== b.dataset.tab);
 });
 $("#btnExport").onclick = async () => {
   const name = `diary-backup-${todayISO()}.json`;
